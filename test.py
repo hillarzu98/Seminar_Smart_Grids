@@ -48,5 +48,40 @@ print(microgrid)
 print(microgrid.modules.pv)
 print(microgrid.modules.grid is microgrid.modules['grid'])
 
+load = -1.0 * microgrid.modules.load.item().current_load
+pv = microgrid.modules.pv.item().current_renewable
 
+net_load = load + pv # negative if load demand exceeds pv
 
+if net_load > 0:
+    net_load = 0.0
+
+battery_0_discharge = min(-1*net_load, microgrid.modules.battery[0].max_production)
+net_load += battery_0_discharge
+
+battery_1_discharge = min(-1*net_load, microgrid.modules.battery[1].max_production)
+net_load += battery_1_discharge
+
+grid_import = min(-1*net_load, microgrid.modules.grid.item().max_production)
+
+control = {"battery" : [battery_0_discharge, battery_1_discharge],
+           "grid": [grid_import]}
+
+#obs, reward, done, info = microgrid.step(control, normalized=False)
+
+#print(obs, reward, done, info)
+
+for _ in range(10):
+    obs, reward, done, info = microgrid.step(control, normalized=False)
+    print(obs, reward, done, info)
+
+microgrid.log[[('load', 0, 'load_met'),
+               ('load', 0, 'load_current'),
+               ('pv', 0, 'renewable_used'),
+               ('battery', 0, 'charge_amount'),
+               ('battery', 0, 'discharge_amount'),
+               ('battery', 1, 'charge_amount'),
+               ('battery', 1, 'discharge_amount'),
+               ('grid', 0, 'grid_export'),
+               ('grid', 0, 'grid_import'),
+               ('balancing', 0, 'loss_load')]].droplevel(axis=1, level=1).plot()
