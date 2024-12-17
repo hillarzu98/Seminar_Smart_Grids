@@ -50,8 +50,8 @@ modules = [
 microgrid = Microgrid(modules)
 
 #env = gym.make("CartPole-v1", render_mode="rgb_array")
-env = DiscreteMicrogridEnv.from_scenario(microgrid_number=4)
-#env = DiscreteMicrogridEnv.from_microgrid(microgrid)
+#env = DiscreteMicrogridEnv.from_scenario(microgrid_number=4)
+env = DiscreteMicrogridEnv.from_microgrid(microgrid)
 #check_env(env)
 
 model = A2C("MlpPolicy", env, verbose=1)
@@ -68,27 +68,40 @@ battery_lst = []
 battery_abs_lst = []
 for i in range(1000):
     action, _state = model.predict(obs, deterministic=True)
-    #print(env.convert_action(0))
-    #obs, reward, done, info = vec_env.step(action)
     obs, rewards, terminations, truncations, infos = convert_to_terminated_truncated_step_api(vec_env.step(action), is_vector_env=True)
     actions_lst.append(action)
     reward_lst.append(rewards)
-    load_lst.append(infos[0]['load'][0]['absorbed_energy'])
-    pv_lst.append(infos[0]['pv'][0]['provided_energy'])
+    
+    # Get info from the first environment
+    env_info = infos[0]
+    
+    # Access module data safely
     try:
-        battery_lst.append(infos[0]['battery'][0]['provided_energy'])
-    except:
+        load_lst.append(env_info['load']['absorbed_energy'])
+    except (KeyError, TypeError, IndexError):
+        load_lst.append(0)
+        
+    try:
+        pv_lst.append(env_info['pv']['provided_energy'])
+    except (KeyError, TypeError, IndexError):
+        pv_lst.append(0)
+        
+    try:
+        battery_lst.append(env_info['battery']['provided_energy'])
+    except (KeyError, TypeError, IndexError):
         battery_lst.append(0)
+        
     try:
-        battery_abs_lst.append(infos[0]['battery'][0]['absorbed_energy'])
-    except:
+        battery_abs_lst.append(env_info['battery']['absorbed_energy'])
+    except (KeyError, TypeError, IndexError):
         battery_abs_lst.append(0)
+        
     try:
-        grid_lst.append(infos[0]['grid'][0]['provided_energy'])
-    except:
+        grid_lst.append(env_info['grid']['provided_energy'])
+    except (KeyError, TypeError, IndexError):
         grid_lst.append(0)
     
-    print(rewards,infos)
+    print(rewards, env_info)
 
 plt.subplot(411)
 plt.plot(np.linspace(0,100,1000),reward_lst)
