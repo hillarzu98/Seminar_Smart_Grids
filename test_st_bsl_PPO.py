@@ -1,29 +1,26 @@
 import pandas as pd
 import numpy as np
 from pymgrid.envs import DiscreteMicrogridEnv
-from stable_baselines3 import A2C
+from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
-from stable_baselines3.common.env_util import make_vec_env
 import gymnasium as gym
 from stable_baselines3.common.env_checker import check_env
 from gymnasium.utils.step_api_compatibility import convert_to_terminated_truncated_step_api
 import matplotlib.pyplot as plt
 import os
-from stable_baselines3.common.monitor import Monitor
+
+
+
 #env = gym.make("CartPole-v1", render_mode="rgb_array")
 env = DiscreteMicrogridEnv.from_scenario(microgrid_number=11)
-env = Monitor(env)
 #env = DiscreteMicrogridEnv.from_microgrid(microgrid)
 #check_env(env)
 #env = Monitor(env, log_dir)
 
 
-# set up logger
-#new_logger = configure(tmp_path, ["stdout", "csv", "tensorboard"])
-
-model = A2C("MlpPolicy", env, verbose=1, tensorboard_log="./a2c_testlog/")
-model.learn(total_timesteps=1000, tb_log_name="first_run")
+model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_testlog/")
+model.learn(total_timesteps=100, tb_log_name="first_run")
 vec_env = model.get_env()
 obs = vec_env.reset()
 
@@ -39,7 +36,7 @@ genset_lst = []
 num = 300
 for i in range(num):
     action, _state = model.predict(obs, deterministic=True)
-    #print(env.convert_action(action[0]))
+    print(env.convert_action(action[0]))
     #obs, reward, done, info = vec_env.step(action)
     obs, rewards, terminations, truncations, infos = convert_to_terminated_truncated_step_api(vec_env.step(action), is_vector_env=True)
     actions_lst.append(action)
