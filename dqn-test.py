@@ -1,136 +1,99 @@
-# Notwendige Bibliotheken importieren
-import gymnasium as gym
-import numpy as np
-import torch
-import random
-import torch.nn as nn
-import torch.optim as optim
-from collections import deque
-import matplotlib.pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
+from pathlib import Path
+from ray.rllib.algorithms.algorithm import Algorithm
+import gym
+import pandas as pd
+from ray.rllib.algorithms.dqn import DQNConfig
+from pymgrid.envs import DiscreteMicrogridEnv
+from ray.tune.registry import register_env
 
-# Q-Network-Definition
-class QNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        # Netzwerk mit 3 Schichten definieren
-        super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, action_dim)
 
-    def forward(self, state):
-        # Vorwärtsdurchlauf durch das Netzwerk
-        x = torch.relu(self.fc1(state))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+# Definiere die benutzerdefinierte Umgebung
+class MyEnv(gym.Env):
+    def __init__(self, env_config):
+        self.env = DiscreteMicrogridEnv.from_scenario(microgrid_number=1)
+        self.action_space = self.env.action_space
+        self.observation_space = self.env.observation_space
+        self.episode_length = 24  # 24-hour episode
 
-# DQN-Agent
-class DQNAgent:
-    def __init__(self, env, gamma=0.99, epsilon=1.0, epsilon_min=0.1, epsilon_decay=0.995, lr=1e-3, batch_size=32, memory_size=10000, log_dir="./dqn_logs"):
-        self.env = env
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.epsilon_min = epsilon_min
-        self.epsilon_decay = epsilon_decay
-        self.batch_size = batch_size
-        self.memory = deque(maxlen=memory_size)
+    def reset(self):
+        return self.env.reset()
 
-        # Haupt- und Zielnetzwerk initialisieren
-        self.model = QNetwork(env.observation_space.shape[0], env.action_space.n)
-        self.target_model = QNetwork(env.observation_space.shape[0], env.action_space.n)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        return obs, reward, done, info
 
-        self.update_target_network()  # Zielnetzwerk synchronisieren
-        self.writer = SummaryWriter(log_dir=log_dir)  # TensorBoard-Logger
 
-    def update_target_network(self):
-        # Zielnetzwerk aktualisieren
-        self.target_model.load_state_dict(self.model.state_dict())
+def env_creator(env_config):
+    return MyEnv(env_config)  # Rückgabe einer Instanz der benutzerdefinierten Umgebung
 
-    def act(self, state):
-        # Epsilon-greedy Policy
-        if np.random.rand() < self.epsilon:
-            return self.env.action_space.sample()
-        state_tensor = torch.tensor(state, dtype=torch.float32)
-        q_values = self.model(state_tensor)
-        return torch.argmax(q_values).item()
 
-    def remember(self, state, action, reward, next_state, done):
-        # Übergang im Replay-Buffer speichern
-        self.memory.append((state, action, reward, next_state, done))
+# Liste zur Speicherung der Ergebnisse
+df_list = []
 
-    def replay(self):
-        # Erfahrungsspeicher trainieren
-        if len(self.memory) < self.batch_size:
-            return
+# Umgebung registrieren
+register_env("my_env", env_creator)
 
-        minibatch = random.sample(self.memory, self.batch_size)
-        states, actions, rewards, next_states, dones = zip(*minibatch)
+# Konfiguration des DQN-Algorithmus
+config = (
+    DQNConfig()
+    .environment(env="my_env")
+    .framework("torch")  # PyTorch-Backend
+    .resources(num_gpus=0)  # Keine GPU verwenden
+    .rollouts(num_rollout_workers=1)  # Ein Rollout-Worker
+    .training(
+        gamma=0.99,  # Diskontierungsfaktor
+        lr=1e-3,  # Lernrate
+        train_batch_size=32,  # Batch-Größe
+        replay_buffer_config={"capacity": 10000},  # Replay-Buffer
+    )
+)
 
-        states = torch.tensor(np.array(states), dtype=torch.float32)
-        actions = torch.tensor(actions, dtype=torch.long)
-        rewards = torch.tensor(rewards, dtype=torch.float32)
-        next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
-        dones = torch.tensor(dones, dtype=torch.float32)
+# Exploration-Einstellungen hinzufügen
+config.exploration_config = {
+    "type": "EpsilonGreedy",  # Explorationsstrategie
+    "initial_epsilon": 1.0,  # Startwert für Epsilon
+    "final_epsilon": 0.1,  # Minimaler Epsilon-Wert
+    "epsilon_timesteps": 10000,  # Dauer des Decay
+}
 
-        q_values = self.model(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-        next_q_values = self.target_model(next_states).max(1)[0]
-        targets = rewards + self.gamma * next_q_values * (1 - dones)
+# Training mit DQN starten
+algo = config.build()
 
-        loss = nn.MSELoss()(q_values, targets)
+# Training über mehrere Iterationen
+for i in range(10):  # Anzahl der Iterationen
+    result = algo.train()
+    print(f"Iteration {i}: episode_reward_mean = {result['episode_reward_mean']}")
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+# Evaluation
+for i in range(1, 2):  # Nur Microgrid 1 (anpassbar)
+    env = DiscreteMicrogridEnv.from_scenario(microgrid_number=i)
 
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+    # Agent von einem gespeicherten Checkpoint laden, falls nötig
+    # algo = Algorithm.from_checkpoint("<Pfad_zum_Checkpoint>")
 
-    def train(self, total_timesteps=10000):
-        # Training für gegebene Anzahl an Schritten
-        timestep = 0
-        episode_rewards = []
-        avg_rewards = []
+    episode_reward = 0
+    done = False
+    obs = env.reset()
+    while not done:
+        action = algo.compute_single_action(obs)
+        obs, reward, done, info = env.step(action)
+        episode_reward += reward
 
-        while timestep < total_timesteps:
-            state, _ = self.env.reset()
-            episode_reward = 0
-            done = False
+    print(f"Total reward for microgrid {i}: {episode_reward}")
 
-            while not done:
-                action = self.act(state)
-                next_state, reward, done, _, _ = self.env.step(action)
-                self.remember(state, action, reward, next_state, done)
-                self.replay()
-                state = next_state
-                episode_reward += reward
-                timestep += 1
+    df = env.log
+    print(df["balance"][0]["reward"].std())
+    try:
+        if df['grid'][0]["grid_status_current"].eq(1).all():
+            df["weak_grid"] = 0
+        else:
+            df["weak_grid"] = 1
+    except:
+        df["weak_grid"] = pd.NA
+    df_list.append(df)
 
-            episode_rewards.append(episode_reward)
-            avg_reward = np.mean(episode_rewards[-100:])
-            avg_rewards.append(avg_reward)
-            self.writer.add_scalar("AvgReward", avg_reward, timestep)
-            print(f"Step: {timestep}, AvgReward: {avg_reward:.2f}")
-
-            if timestep % 1000 == 0:
-                self.update_target_network()
-
-        self.writer.close()
-        self.plot_training_results(episode_rewards, avg_rewards)
-
-    def plot_training_results(self, rewards, avg_rewards):
-        # Ergebnisse mit matplotlib plotten
-        plt.figure(figsize=(12, 6))
-        plt.plot(rewards, label="Episodenbelohnung", alpha=0.6)
-        plt.plot(avg_rewards, label="100-Episoden Durchschnitt", linewidth=2)
-        plt.title("Trainingsbelohnungen über Zeit")
-        plt.xlabel("Episode")
-        plt.ylabel("Belohnung")
-        plt.legend()
-        plt.grid()
-        plt.show()
-
-# Umgebung definieren und Agent trainieren
-env = gym.make("CartPole-v1")
-agent = DQNAgent(env)
-agent.train(total_timesteps=50000)
+# Ergebnisse analysieren
+df = pd.concat(df_list)
+all_df = df["balance"][0]["reward"]
+print("Mean Cost:" + str(all_df.mean()))
+print("Total Cost:" + str(all_df.sum()))
