@@ -63,7 +63,7 @@ class MultiMicrogridEnv(gym.Env):
         # Randomly select a microgrid for this episode
         self.current_microgrid = np.random.choice(self.microgrid_numbers)
         self.current_env = self.envs[self.current_microgrid]
-        
+        print(f"Current Microgrid: {self.current_microgrid}")
         # Get observation and action mask
         obs = self.current_env.reset()
         action_mask = self.get_action_mask()
@@ -78,7 +78,7 @@ class MultiMicrogridEnv(gym.Env):
         action_mask = self.get_action_mask()
         #print(action, action_mask)
         if not action_mask[action]:
-            return self.reset(), -1.0, True, {"invalid_action": True}
+            return self.reset(), -1000.0, True, {"invalid_action": True}
             
         obs, reward, done, info = self.current_env.step(action)
         
@@ -160,10 +160,10 @@ class ActionMaskModel(TorchModelV2, nn.Module):
     def value_function(self):
         return self.internal_model.value_function()
 
-multi = MultiMicrogridEnv({})
-obs = multi.reset()
+#multi = MultiMicrogridEnv({})
+#obs = multi.reset()
 
-obs, reward, done, info = multi.step(1)
+#obs, reward, done, info = multi.step(1)
 
 # Register the custom model
 ModelCatalog.register_custom_model("action_mask_model", ActionMaskModel)
@@ -179,7 +179,7 @@ config = {
     "disable_env_checking": True,
     "env": "multi_microgrid",
     "env_config": {
-        "microgrid_numbers": [1, 2]  # Add all microgrid numbers you want to support
+        "microgrid_numbers": list(range(25))  # Add all microgrid numbers you want to support
     },
     "framework": "torch",
     "lr": 1e-4,
@@ -213,7 +213,7 @@ config = {
 analysis = tune.run(
     PPOTrainer,
     config=config,
-    stop={"timesteps_total": 1_000},  # Train for 1 million timesteps
+    stop={"timesteps_total": 2_000_000},  # Train for 1 million timesteps
     checkpoint_at_end=True,
     local_dir="./results_multi",
     metric="episode_reward_mean",

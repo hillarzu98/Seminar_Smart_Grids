@@ -15,6 +15,7 @@ from ray.rllib.models.torch.fcnet import FullyConnectedNetwork as TorchFC
 from ray.rllib.utils.framework import try_import_tf, try_import_torch
 from ray.rllib.utils.torch_utils import FLOAT_MIN
 from ray.rllib.algorithms.algorithm import Algorithm
+import pandas as pd
 
 tf1, tf, tfv = try_import_tf()
 torch, nn = try_import_torch()
@@ -159,82 +160,89 @@ class ActionMaskModel(TorchModelV2, nn.Module):
 
     def value_function(self):
         return self.internal_model.value_function()
+df_list = []
+for i in range(0,2,1):
+    config = {
+    "env_config": {
+        "microgrid_numbers": [i]  # Add all microgrid numbers you want to support
+    },}
+    multi = MultiMicrogridEnv({
+            "microgrid_numbers": [i]  # Add all microgrid numbers you want to support
+        })
+    obs = multi.reset()
 
-multi = MultiMicrogridEnv({
-        "microgrid_numbers": [5]  # Add all microgrid numbers you want to support
-    })
-obs = multi.reset()
+    #obs, reward, done, info = multi.step(1)
 
-#obs, reward, done, info = multi.step(1)
+    # Register the custom model
+    ModelCatalog.register_custom_model("action_mask_model", ActionMaskModel)
 
-# Register the custom model
-ModelCatalog.register_custom_model("action_mask_model", ActionMaskModel)
+    #Register the environment
+    def env_creator(env_config):
+        return MultiMicrogridEnv(env_config)
 
-# Register the environment
-def env_creator(env_config):
-    return MultiMicrogridEnv(env_config)
+    register_env("multi_microgrid", env_creator)
 
-register_env("multi_microgrid", env_creator)
+    algo = Algorithm.from_checkpoint("C:/Users/arin1/Seminar_Smart_Grids/multi_env/results_multi/PPO_2025-01-26_17-03-17/PPO_multi_microgrid_0e2f4_00000_0_2025-01-26_17-03-17/checkpoint_000209")
 
-algo = Algorithm.from_checkpoint("C:/Users/arin1/Seminar_Smart_Grids/results_multi/PPO_2025-01-25_12-38-27/PPO_multi_microgrid_e49b1_00000_0_2025-01-25_12-38-27/checkpoint_000001")
+    #env = DiscreteMicrogridEnv.from_scenario(microgrid_number=1)
 
-#env = DiscreteMicrogridEnv.from_scenario(microgrid_number=1)
-
-episode_reward = 0
-done = False
-obs = multi.reset()
-while not done:
-    action = algo.compute_single_action(obs)
-    obs, reward, done, info = multi.step(action)
-
+    episode_reward = 0
+    done = False
+    obs = multi.reset()
+    while not done:
+        action = algo.compute_single_action(obs)
+        obs, reward, done, info = multi.step(action)
+        df = multi.envs[i].log
+    # Result of single env
+    df = multi.envs[i].log
     # df = env.log
-    # print(df["balance"][0]["reward"].mean())
-    # print(df["balance"][0]["reward"].sum())
-    # print(df["balance"][0]["reward"].std())
-    # try:
-    #     # if file.name in "mpc_24.csv":
-    #     #     print(file.name)
-    #     if df['grid'][0]["grid_status_current"].eq(1).all():
-    #         #print("NO Weak Grid")
-    #         df["weak_grid"] = 0
-    #     else:
-    #         #print("Weak Grid")
-    #         df["weak_grid"] = 1
-    # except:
-    #     #print("NO Grid")
-    #     df["weak_grid"] = pd.NA
-    # df_list.append(df)
+    print(df["balance"][0]["reward"].mean())
+    print(df["balance"][0]["reward"].sum())
+    print(df["balance"][0]["reward"].std())
+    try:
+        # if file.name in "mpc_24.csv":
+        #     print(file.name)
+        if df['grid'][0]["grid_status_current"].eq(1).all():
+            #print("NO Weak Grid")
+            df["weak_grid"] = 0
+        else:
+            #print("Weak Grid")
+            df["weak_grid"] = 1
+    except:
+        #print("NO Grid")
+        df["weak_grid"] = pd.NA
+    df_list.append(df)
 
-#df = pd.concat(df_list)
+df = pd.concat(df_list)
 
-df = multi.envs[5].log
+
 #All Grids x25
 all_df = df["balance"][0]["reward"]
 print("Mean Cost:" + str(all_df.mean()))
 print("Total Cost:" + str(all_df.sum()))
 
-# #----- Only needed when it is possible to run multiple grids with a agent
-# # Grid Only x7
-# grid_only = df[pd.notna(df['grid'][0]["reward"]) & pd.isna(df['genset'][0]["reward"])]
-# print("Grid Only Mean:" + str(grid_only["balance"][0]["reward"].mean()))
-# print("Grid Only Std:" + str(grid_only["balance"][0]["reward"].std()))
-# print("Grid Only Sum:" + str(grid_only["balance"][0]["reward"].sum()/7))
-# len(df[pd.notna(df['grid'][0]["reward"]) & pd.isna(df['genset'][0]["reward"])])/8758
-# # Genset Only x10
-# genset_only = df[pd.isna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"])]
-# print("Genset Only Mean:" + str(genset_only["balance"][0]["reward"].mean()))
-# print("Genset Only Std:" + str(genset_only["balance"][0]["reward"].std()))
-# print("Genset Only Sum:" + str(genset_only["balance"][0]["reward"].sum()/10))
-# len(df[pd.isna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"])])/8758
-# # Grid + Genset x4
-# grid_genset = df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(0)]
-# print("Grid + Genset Mean:" + str(grid_genset["balance"][0]["reward"].mean()))
-# print("Grid + Genset Std:" + str(grid_genset["balance"][0]["reward"].std()))
-# print("Grid + Genset Sum:" + str(grid_genset["balance"][0]["reward"].sum()/4))
-# len(df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(0)] )/8758
-# # Genset + Weak Grid x4
-# grid_genset_weak = df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(1)]
-# print("Genset + Weak Grid Mean:" + str(grid_genset_weak["balance"][0]["reward"].mean()))
-# print("Genset + Weak Grid Std:" + str(grid_genset_weak["balance"][0]["reward"].std()))
-# print("Genset + Weak Grid Sum:" + str(grid_genset_weak["balance"][0]["reward"].sum()/4))
-# len(df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(1)] )/8758
+#----- Only needed when it is possible to run multiple grids with a agent
+# Grid Only x7
+grid_only = df[pd.notna(df['grid'][0]["reward"]) & pd.isna(df['genset'][0]["reward"])]
+print("Grid Only Mean:" + str(grid_only["balance"][0]["reward"].mean()))
+print("Grid Only Std:" + str(grid_only["balance"][0]["reward"].std()))
+print("Grid Only Sum:" + str(grid_only["balance"][0]["reward"].sum()/7))
+len(df[pd.notna(df['grid'][0]["reward"]) & pd.isna(df['genset'][0]["reward"])])/8758
+# Genset Only x10
+genset_only = df[pd.isna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"])]
+print("Genset Only Mean:" + str(genset_only["balance"][0]["reward"].mean()))
+print("Genset Only Std:" + str(genset_only["balance"][0]["reward"].std()))
+print("Genset Only Sum:" + str(genset_only["balance"][0]["reward"].sum()/10))
+len(df[pd.isna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"])])/8758
+# Grid + Genset x4
+grid_genset = df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(0)]
+print("Grid + Genset Mean:" + str(grid_genset["balance"][0]["reward"].mean()))
+print("Grid + Genset Std:" + str(grid_genset["balance"][0]["reward"].std()))
+print("Grid + Genset Sum:" + str(grid_genset["balance"][0]["reward"].sum()/4))
+len(df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(0)] )/8758
+# Genset + Weak Grid x4
+grid_genset_weak = df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(1)]
+print("Genset + Weak Grid Mean:" + str(grid_genset_weak["balance"][0]["reward"].mean()))
+print("Genset + Weak Grid Std:" + str(grid_genset_weak["balance"][0]["reward"].std()))
+print("Genset + Weak Grid Sum:" + str(grid_genset_weak["balance"][0]["reward"].sum()/4))
+len(df[pd.notna(df['grid'][0]["reward"]) & pd.notna(df['genset'][0]["reward"]) & df["weak_grid"].eq(1)] )/8758
