@@ -65,11 +65,12 @@ for i in range(10):  # Anzahl der Iterationen
     print(f"Iteration {i}: episode_reward_mean = {result['episode_reward_mean']}")
 
 # Evaluation
-for i in range(1, 2):  # Nur Microgrid 1 (anpassbar)
+for i in range(1, 2, 1):  # Nur Microgrid 1 (anpassbar)
     env = DiscreteMicrogridEnv.from_scenario(microgrid_number=i)
-
+    register_env("my_env", env_creator)
+    checkpoint_path = algo.save("C:/Users/Sarah/Documents/GitHub/Seminar_Smart_Grids/results/DQN_2025-01-05_14-05-59/DQN_my_env_cf0c0_00000_0_2025-01-05_14-06-00/checkpoint_001000/")
     # Agent von einem gespeicherten Checkpoint laden, falls nötig
-    # algo = Algorithm.from_checkpoint("<Pfad_zum_Checkpoint>")
+    algo = Algorithm.from_checkpoint(checkpoint_path)
 
     episode_reward = 0
     done = False
